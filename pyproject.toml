@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["dvc-s3[tests]", "mypy==1.19.0"]
+dev = ["dvc-s3[tests]", "mypy==1.19.1"]
 tests = [
     "dvc[testing]",
     "pytest>=7,<9",
