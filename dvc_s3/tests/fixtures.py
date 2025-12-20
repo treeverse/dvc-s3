@@ -13,20 +13,16 @@ from .cloud import S3
 def s3_server():
     server = ThreadedMotoServer("127.0.0.1", 0, verbose=False)
     server.start()
+    host, port = server.get_host_and_port()
     try:
-        yield server
+        yield f"http://{host}:{port}"
     finally:
         server.stop()
 
 
 @pytest.fixture(scope="session")
 def s3_config(s3_server) -> dict:
-    host, port = s3_server.get_host_and_port()
-    return {
-        "endpoint_url": f"http://{host}:{port}",
-        "aws_access_key_id": "testing",
-        "aws_secret_access_key": "testing",
-    }
+    return {"endpoint_url": s3_server}
 
 
 @pytest.fixture
@@ -35,8 +31,8 @@ def s3_client(s3_config):
 
 
 @pytest.fixture(autouse=True)
-def reset_s3_fixture(s3_config):
-    req = Request(f"{s3_config['endpoint_url']}/moto-api/reset", method="POST")
+def reset_s3_fixture(s3_server):
+    req = Request(f"{s3_server}/moto-api/reset", method="POST")
     try:
         yield
     finally:
