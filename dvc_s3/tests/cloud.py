@@ -18,7 +18,12 @@ class S3(Cloud, CloudURLInfo):
 
     @property
     def config(self):
-        return {"url": str(self), "endpointurl": self._config.get("endpoint_url")}
+        return {
+            "url": str(self),
+            "endpointurl": self._config.get("endpoint_url"),
+            "access_key_id": self._config.get("aws_access_key_id"),
+            "secret_access_key": self._config.get("aws_secret_access_key"),
+        }
 
     @cached_property
     def _s3(self):
