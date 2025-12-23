@@ -18,12 +18,17 @@ class S3(Cloud, CloudURLInfo):
 
     @property
     def config(self):
-        return {
-            "url": str(self),
-            "endpointurl": self._config.get("endpoint_url"),
-            "access_key_id": self._config.get("aws_access_key_id"),
-            "secret_access_key": self._config.get("aws_secret_access_key"),
+        ret = {"url": str(self)}
+        config_map = {
+            "access_key_id": "aws_access_key_id",
+            "secret_access_key": "aws_secret_access_key",
+            "endpointurl": "endpoint_url",
         }
+        for key, config_key in config_map.items():
+            value = self._config.get(config_key)
+            if value is not None:
+                ret[key] = value
+        return ret
 
     @cached_property
     def _s3(self):
