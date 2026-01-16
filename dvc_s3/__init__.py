@@ -41,7 +41,7 @@ def human_readable_to_bytes(value: str) -> int:
 # pylint:disable=abstract-method
 class S3FileSystem(ObjectFileSystem):
     protocol = "s3"
-    REQUIRES: ClassVar[dict[str, str]] = {"s3fs": "s3fs", "boto3": "boto3"}
+    REQUIRES: ClassVar[dict[str, str]] = {"s3fs": "s3fs"}
     PARAM_CHECKSUM = "etag"
 
     VERSION_ID_KEY = "versionId"
@@ -111,8 +111,6 @@ class S3FileSystem(ObjectFileSystem):
         objects, one for transfer.TransferConfig and other is the
         general session config"""
 
-        from boto3.s3.transfer import TransferConfig
-
         config, transfer_config = {}, {}
         for key, value in s3_config.items():
             if key in self._TRANSFER_CONFIG_ALIASES:
@@ -125,14 +123,12 @@ class S3FileSystem(ObjectFileSystem):
             else:
                 config[key] = value
 
-        # pylint: disable=attribute-defined-outside-init
-        self._transfer_config = TransferConfig(**transfer_config)
+        self._transfer_config = transfer_config
         return config
 
     def _load_aws_config_file(self, profile):
         from botocore.configloader import load_config
 
-        # pylint: disable=attribute-defined-outside-init
         self._transfer_config = None
         config_path = os.environ.get("AWS_CONFIG_FILE", _AWS_CONFIG_PATH)
         if not os.path.exists(config_path):
