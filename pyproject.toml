@@ -34,7 +34,6 @@ dependencies = [
     "funcy>=1.14",
     "fsspec",
     "s3fs>=2024.12.0",
-    "aiobotocore>=2.5.0",
     "botocore",
     "flatten_dict>=0.4.1,<1",
 ]
