@@ -136,3 +136,31 @@ def test_key_id_and_secret():
     assert fs.fs_args["key"] == key_id
     assert fs.fs_args["secret"] == key_secret
     assert fs.fs_args["token"] == session_token
+
+
+def test_assume_role(monkeypatch):
+    from unittest.mock import MagicMock
+
+    role_arn = "arn:aws:iam::123456789012:role/test-role"
+
+    mock_sts = MagicMock()
+    mock_sts.assume_role.return_value = {
+        "Credentials": {
+            "AccessKeyId": "assumed-key-id",
+            "SecretAccessKey": "assumed-secret",
+            "SessionToken": "assumed-session-token",
+        }
+    }
+    mock_session = MagicMock()
+    mock_session.create_client.return_value = mock_sts
+    monkeypatch.setattr("botocore.session.Session", lambda **kwargs: mock_session)
+
+    fs = S3FileSystem(url=url, role_arn=role_arn)
+    assert fs.fs_args["key"] == "assumed-key-id"
+    assert fs.fs_args["secret"] == "assumed-secret"
+    assert fs.fs_args["token"] == "assumed-session-token"
+    assert "profile" not in fs.fs_args
+
+    mock_sts.assume_role.assert_called_once_with(
+        RoleArn=role_arn, RoleSessionName="dvc"
+    )
