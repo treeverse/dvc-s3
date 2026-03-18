@@ -219,6 +219,10 @@ class S3FileSystem(ObjectFileSystem):
             # Enable bucket region caching
             login_info["cache_regions"] = config.get("cache_regions", True)
 
+        role_arn = config.get("role_arn")
+        if role_arn:
+            self._assume_role(login_info, role_arn)
+
         config_path = config.get("configpath")
         if config_path:
             os.environ.setdefault("AWS_CONFIG_FILE", config_path)
@@ -228,6 +232,29 @@ class S3FileSystem(ObjectFileSystem):
             {key: value for key, value in d.items() if value is not None},
             splitter="dot",
         )
+
+    @staticmethod
+    def _assume_role(login_info, role_arn):
+        import botocore.session
+
+        session = botocore.session.Session(
+            profile=login_info.get("profile"),
+        )
+        sts = session.create_client(
+            "sts",
+            aws_access_key_id=login_info.get("key"),
+            aws_secret_access_key=login_info.get("secret"),
+            aws_session_token=login_info.get("token"),
+        )
+        resp = sts.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName="dvc",
+        )
+        creds = resp["Credentials"]
+        login_info["key"] = creds["AccessKeyId"]
+        login_info["secret"] = creds["SecretAccessKey"]
+        login_info["token"] = creds["SessionToken"]
+        login_info["profile"] = None
 
     @wrap_prop(threading.Lock())
     @cached_property
