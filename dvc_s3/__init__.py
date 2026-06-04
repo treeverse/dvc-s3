@@ -1,6 +1,8 @@
 import os
 import threading
 from collections import defaultdict
+from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, ClassVar, Optional
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
@@ -11,6 +13,35 @@ from dvc_objects.fs.base import ObjectFileSystem
 from dvc_objects.fs.errors import ConfigError
 
 _AWS_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".aws", "config")
+
+
+_DIST_NAME = "dvc-s3"
+
+
+@lru_cache(maxsize=1)
+def _user_agent_extra() -> str:
+    try:
+        return f"{_DIST_NAME}/{version(_DIST_NAME)}"
+    except PackageNotFoundError:
+        return f"{_DIST_NAME}/dev"
+
+
+def _clean_user_agent_extra(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ConfigError(
+            f"`user_agent_extra` must be a string, got {type(value).__name__}"
+        )
+    value = value.strip()
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        raise ConfigError(
+            "`user_agent_extra` must not contain control characters "
+            f"(e.g. CR/LF): {value!r}"
+        )
+    if not value.isascii():
+        raise ConfigError(f"`user_agent_extra` must be ASCII-encodable: {value!r}")
+    return value
 
 
 # https://github.com/aws/aws-cli/blob/5aa599949f60b6af554fd5714d7161aa272716f7/awscli/customizations/s3/utils.py
@@ -173,6 +204,13 @@ class S3FileSystem(ObjectFileSystem):
         config_kwargs["read_timeout"] = config.get("read_timeout")
         config_kwargs["connect_timeout"] = config.get("connect_timeout")
 
+        # user agent configuration
+        default_ua = _user_agent_extra()
+        user_extra = _clean_user_agent_extra(config.get("user_agent_extra"))
+        config_kwargs["user_agent_extra"] = (
+            f"{default_ua} {user_extra}" if user_extra else default_ua
+        )
+
         # encryptions
         additional = login_info["s3_additional_kwargs"]
         sse_customer_key = None
@@ -204,8 +242,7 @@ class S3FileSystem(ObjectFileSystem):
                 additional[grant_key] = config[grant_option]
 
         # config kwargs
-        session_config = login_info["config_kwargs"]
-        session_config["s3"] = self._load_aws_config_file(login_info["profile"])
+        config_kwargs["s3"] = self._load_aws_config_file(login_info["profile"])
 
         shared_creds = config.get("credentialpath")
         if shared_creds:
@@ -213,7 +250,7 @@ class S3FileSystem(ObjectFileSystem):
 
         if (
             client["region_name"] is None
-            and session_config["s3"].get("region_name") is None
+            and config_kwargs["s3"].get("region_name") is None
             and os.getenv("AWS_REGION") is None
         ):
             # Enable bucket region caching

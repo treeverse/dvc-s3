@@ -136,3 +136,89 @@ def test_key_id_and_secret():
     assert fs.fs_args["key"] == key_id
     assert fs.fs_args["secret"] == key_secret
     assert fs.fs_args["token"] == session_token
+
+
+def test_default_user_agent_extra():
+    fs = S3FileSystem(url=url)
+    ua = fs.fs_args["config_kwargs"]["user_agent_extra"]
+    # "dvc-s3/<version>" in normal installs; "dvc-s3/dev" when package
+    # metadata is missing (source-only / frozen-binary cases).
+    assert ua.startswith("dvc-s3/")
+    assert " " not in ua  # no extra token appended by default
+
+
+def test_user_agent_extra_appends_user_value():
+    fs = S3FileSystem(url=url, user_agent_extra="downstream/1.2.3")
+    ua = fs.fs_args["config_kwargs"]["user_agent_extra"]
+    assert ua.startswith("dvc-s3/")
+    assert ua.endswith(" downstream/1.2.3")
+
+
+def test_user_agent_extra_strips_whitespace():
+    fs = S3FileSystem(url=url, user_agent_extra="  downstream/1.2.3  ")
+    ua = fs.fs_args["config_kwargs"]["user_agent_extra"]
+    assert ua.endswith(" downstream/1.2.3")
+    assert "  " not in ua
+
+
+def test_user_agent_extra_rejects_control_chars():
+    with pytest.raises(ConfigError):
+        _ = S3FileSystem(
+            url=url, user_agent_extra="downstream/1.2.3\r\nX-Evil: 1"
+        ).fs_args
+
+
+def test_user_agent_extra_rejects_non_string():
+    with pytest.raises(ConfigError):
+        _ = S3FileSystem(url=url, user_agent_extra=123).fs_args
+
+
+def test_user_agent_extra_rejects_non_ascii():
+    with pytest.raises(ConfigError):
+        _ = S3FileSystem(url=url, user_agent_extra="downstream/1.2.3 🚀").fs_args
+
+
+def test_user_agent_extra_on_the_wire(s3_config, s3_bucket):
+    fs = S3FileSystem(
+        url=f"s3://{s3_bucket}",
+        endpointurl=s3_config["endpoint_url"],
+        access_key_id=s3_config["aws_access_key_id"],
+        secret_access_key=s3_config["aws_secret_access_key"],
+        user_agent_extra="downstream/1.2.3",
+    )
+    fs.fs.ls(s3_bucket)  # warm up so the client/session is created
+
+    captured = []
+
+    def _capture(request, **_):
+        captured.append(request.headers.get("User-Agent"))
+
+    events = fs.fs.s3.meta.events
+    events.register_first("before-send.s3", _capture)
+    try:
+        fs.fs.ls(s3_bucket, refresh=True)  # force a real request (bypass dircache)
+    finally:
+        events.unregister("before-send.s3", _capture)
+
+    assert captured, "no request reached the wire"
+    ua = captured[0]
+    ua = ua.decode() if isinstance(ua, bytes) else ua
+    assert ua, "request had no User-Agent header"
+    assert "dvc-s3/" in ua
+    assert "downstream/1.2.3" in ua
+
+
+def test_user_agent_extra_dev_fallback(monkeypatch):
+    from importlib.metadata import PackageNotFoundError
+
+    import dvc_s3
+
+    def _raise(name):
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(dvc_s3, "version", _raise)
+    dvc_s3._user_agent_extra.cache_clear()
+    try:
+        assert dvc_s3._user_agent_extra() == "dvc-s3/dev"
+    finally:
+        dvc_s3._user_agent_extra.cache_clear()
