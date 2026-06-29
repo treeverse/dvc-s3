@@ -42,7 +42,7 @@ dependencies = [
 dev = ["dvc-s3[tests]", "mypy==1.19.1"]
 tests = [
     "dvc[testing]",
-    "pytest>=7,<9",
+    "pytest>=7,<10",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.2",
     "moto[server]",
