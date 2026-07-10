@@ -142,11 +142,64 @@ class S3FileSystem(ObjectFileSystem):
         s3_config = profile_config.get("s3", {})
         return self._split_s3_config(s3_config)
 
-    def _prepare_credentials(self, **config):
+    def _prepare_sse_kwargs(self, config: dict) -> dict:
         import base64
 
-        from flatten_dict import flatten, unflatten
         from s3fs.utils import SSEParams
+
+        sse_customer_key = None
+        if config.get("sse_customer_key"):
+            if config.get("sse_kms_key_id"):
+                raise ConfigError(
+                    "`sse_kms_key_id` and `sse_customer_key` AWS S3 config "
+                    "options are mutually exclusive"
+                )
+            sse_customer_key = base64.b64decode(config.get("sse_customer_key"))
+        sse_customer_algorithm = config.get("sse_customer_algorithm")
+        if not sse_customer_algorithm and sse_customer_key:
+            sse_customer_algorithm = "AES256"
+        return SSEParams(
+            server_side_encryption=config.get("sse"),
+            sse_customer_algorithm=sse_customer_algorithm,
+            sse_customer_key=sse_customer_key,
+            sse_kms_key_id=config.get("sse_kms_key_id"),
+        ).to_kwargs()
+
+    def _prepare_s3_additional_kwargs(self, config: dict) -> dict:
+        import json
+
+        additional: dict = {}
+        additional.update(self._prepare_sse_kwargs(config))
+
+        additional["ACL"] = config.get("acl")
+        for grant_option, grant_key in self._GRANTS.items():
+            if config.get(grant_option):
+                if additional["ACL"]:
+                    raise ConfigError(
+                        "`acl` and `grant_*` AWS S3 config options "
+                        "are mutually exclusive"
+                    )
+                additional[grant_key] = config[grant_option]
+
+        additional["StorageClass"] = config.get("storage_class")
+        additional["Tagging"] = config.get("object_tags")
+
+        if config.get("requester_pays"):
+            additional["RequestPayer"] = "requester"
+
+        if config.get("extra_s3_args"):
+            try:
+                extra = json.loads(config["extra_s3_args"])
+            except json.JSONDecodeError as exc:
+                raise ConfigError(f"`extra_s3_args` is not valid JSON: {exc}") from exc
+            if not isinstance(extra, dict):
+                raise ConfigError("`extra_s3_args` must be a JSON object")
+            additional.update(extra)
+
+        return additional
+
+    def _prepare_credentials(self, **config):
+        from flatten_dict import flatten, unflatten
 
         login_info = defaultdict(dict)
 
@@ -173,35 +226,9 @@ class S3FileSystem(ObjectFileSystem):
         config_kwargs["read_timeout"] = config.get("read_timeout")
         config_kwargs["connect_timeout"] = config.get("connect_timeout")
 
-        # encryptions
-        additional = login_info["s3_additional_kwargs"]
-        sse_customer_key = None
-        if config.get("sse_customer_key"):
-            if config.get("sse_kms_key_id"):
-                raise ConfigError(
-                    "`sse_kms_key_id` and `sse_customer_key` AWS S3 config "
-                    "options are mutually exclusive"
-                )
-            sse_customer_key = base64.b64decode(config.get("sse_customer_key"))
-        sse_customer_algorithm = config.get("sse_customer_algorithm")
-        if not sse_customer_algorithm and sse_customer_key:
-            sse_customer_algorithm = "AES256"
-        sse_params = SSEParams(
-            server_side_encryption=config.get("sse"),
-            sse_customer_algorithm=sse_customer_algorithm,
-            sse_customer_key=sse_customer_key,
-            sse_kms_key_id=config.get("sse_kms_key_id"),
+        login_info["s3_additional_kwargs"].update(
+            self._prepare_s3_additional_kwargs(config)
         )
-        additional.update(sse_params.to_kwargs())
-        additional["ACL"] = config.get("acl")
-        for grant_option, grant_key in self._GRANTS.items():
-            if config.get(grant_option):
-                if additional["ACL"]:
-                    raise ConfigError(
-                        "`acl` and `grant_*` AWS S3 config options "
-                        "are mutually exclusive"
-                    )
-                additional[grant_key] = config[grant_option]
 
         # config kwargs
         session_config = login_info["config_kwargs"]
