@@ -136,3 +136,84 @@ def test_key_id_and_secret():
     assert fs.fs_args["key"] == key_id
     assert fs.fs_args["secret"] == key_secret
     assert fs.fs_args["token"] == session_token
+
+
+def test_storage_class():
+    fs = S3FileSystem(url=url, storage_class="REDUCED_REDUNDANCY")
+    assert fs.fs_args["s3_additional_kwargs"]["StorageClass"] == "REDUCED_REDUNDANCY"
+
+
+def test_storage_class_not_set():
+    fs = S3FileSystem(url=url)
+    assert "StorageClass" not in fs.fs_args.get("s3_additional_kwargs", {})
+
+
+def test_requester_pays():
+    fs = S3FileSystem(url=url, requester_pays=True)
+    assert fs.fs_args["s3_additional_kwargs"]["RequestPayer"] == "requester"
+
+
+@pytest.mark.parametrize("value", ["true", "True", "1", "yes"])
+def test_requester_pays_string_true(value):
+    fs = S3FileSystem(url=url, requester_pays=value)
+    assert fs.fs_args["s3_additional_kwargs"]["RequestPayer"] == "requester"
+
+
+@pytest.mark.parametrize("value", [False, "false", "False", "0", "no"])
+def test_requester_pays_false(value):
+    fs = S3FileSystem(url=url, requester_pays=value)
+    assert "RequestPayer" not in fs.fs_args.get("s3_additional_kwargs", {})
+
+
+def test_requester_pays_invalid():
+    with pytest.raises(ConfigError):
+        S3FileSystem(url=url, requester_pays="maybe").fs_args  # noqa: B018
+
+
+def test_requester_pays_not_set():
+    fs = S3FileSystem(url=url)
+    assert "RequestPayer" not in fs.fs_args.get("s3_additional_kwargs", {})
+
+
+def test_object_tags():
+    fs = S3FileSystem(url=url, object_tags="env=prod&team=ml")
+    assert fs.fs_args["s3_additional_kwargs"]["Tagging"] == "env=prod&team=ml"
+
+
+def test_object_tags_not_set():
+    fs = S3FileSystem(url=url)
+    assert "Tagging" not in fs.fs_args.get("s3_additional_kwargs", {})
+
+
+def test_extra_s3_args():
+    fs = S3FileSystem(url=url, extra_s3_args='{"StorageClass": "WARM"}')
+    assert fs.fs_args["s3_additional_kwargs"]["StorageClass"] == "WARM"
+
+
+def test_extra_s3_args_multiple_keys():
+    fs = S3FileSystem(
+        url=url,
+        extra_s3_args='{"StorageClass": "COLD", "RequestPayer": "requester"}',
+    )
+    extra = fs.fs_args["s3_additional_kwargs"]
+    assert extra["StorageClass"] == "COLD"
+    assert extra["RequestPayer"] == "requester"
+
+
+def test_extra_s3_args_overrides_named_param():
+    fs = S3FileSystem(
+        url=url,
+        storage_class="STANDARD",
+        extra_s3_args='{"StorageClass": "REDUCED_REDUNDANCY"}',
+    )
+    assert fs.fs_args["s3_additional_kwargs"]["StorageClass"] == "REDUCED_REDUNDANCY"
+
+
+def test_extra_s3_args_invalid_json():
+    with pytest.raises(ConfigError):
+        S3FileSystem(url=url, extra_s3_args="not-json").fs_args  # noqa: B018
+
+
+def test_extra_s3_args_not_a_dict():
+    with pytest.raises(ConfigError):
+        S3FileSystem(url=url, extra_s3_args='"just-a-string"').fs_args  # noqa: B018
